@@ -1,0 +1,22 @@
+{
+  "chews_leaves": {
+    "question": "¿Ves masticación en hojas (bordes irregulares, agujeros grandes)?",
+    "image": "https://tu_usuario.github.io/pest-akinator-images/questions/chews_leaves.jpg"
+  },
+  "frass_present": {
+    "question": "¿Hay excremento (frass) cerca de hojas o cogollos?",
+    "image": "https://tu_usuario.github.io/pest-akinator-images/questions/frass_present.jpg"
+  },
+  "larva_visible_on_whorl": {
+    "question": "¿Ves orugas dentro del cogollo/espiral de la planta?",
+    "image": "https://tu_usuario.github.io/pest-akinator-images/questions/larva_visible_on_whorl.jpg"
+  },
+  "causes_dead_hearts": {
+    "question": "¿Las plantas presentan 'dead heart' (tallo central seco/roto)?",
+    "image": "https://tu_usuario.github.io/pest-akinator-images/questions/causes_dead_hearts.jpg"
+  },
+  "damages_roots": {
+    "question": "¿Se observan daños o pudrición en las raíces?",
+    "image": "https://tu_usuario.github.io/pest-akinator-images/questions/damages_roots.jpg"
+  }
+}
