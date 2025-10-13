@@ -1,126 +1,77 @@
 # app.py
-import os
-import uuid
 from flask import Flask, request, jsonify
-from flask_cors import CORS
-from pest_akinator import PestAkinator
+from pest_akinator import PestAkinator, load_db
+import uuid
 
 app = Flask(__name__)
-CORS(app)
+sessions = {}  # Guarda las sesiones activas del Akinator
 
-# Knowledge engine (loads pests.json & questions.json)
-engine = PestAkinator()
-
-# session_id -> Session instance
-sessions = {}
-
-# optional: require a teach secret to protect POST /api/teach
-TEACH_SECRET = os.environ.get("TEACH_SECRET")
-
-
-@app.route("/")
+@app.route('/')
 def home():
-    return "PestAkinator API - OK"
+    return jsonify({"status": "PestAkinator API online 🚀"})
 
-
-@app.route("/api/new_session", methods=["POST"])
-def new_session():
-    # create new session object
+@app.route('/start', methods=['POST'])
+def start():
+    """Inicia una nueva sesión de identificación"""
+    db = load_db()
     session_id = str(uuid.uuid4())
-    sessions[session_id] = engine.create_session()
-    # choose first question
-    attrs = engine.get_all_attributes()
-    next_attr = sessions[session_id].choose_best_attribute(attrs)
-    q_info = engine.get_question_info(next_attr) if next_attr else None
-    return jsonify({"session_id": session_id, "next_question": q_info}), 201
+    akin = PestAkinator(db)
+    sessions[session_id] = akin
 
+    q = akin.choose_best_question()
+    return jsonify({
+        "session_id": session_id,
+        "question": akin.questions[q],
+        "attribute": q
+    })
 
-@app.route("/api/question", methods=["GET"])
-def get_question():
-    session_id = request.args.get("session_id")
-    if not session_id or session_id not in sessions:
-        return jsonify({"error": "session not found"}), 404
-    session = sessions[session_id]
-    attrs = engine.get_all_attributes()
-    next_attr = session.choose_best_attribute(attrs)
-    if next_attr:
-        q_info = engine.get_question_info(next_attr)
-        return jsonify({"next_question": q_info})
-    else:
-        return jsonify({"next_question": None})
-
-
-@app.route("/api/answer", methods=["POST"])
+@app.route('/answer', methods=['POST'])
 def answer():
-    data = request.get_json() or {}
+    """Recibe la respuesta del usuario (yes/no/unknown)"""
+    data = request.get_json()
     session_id = data.get("session_id")
     attribute = data.get("attribute")
-    answer = data.get("answer")  # 'yes' | 'no' | 'unknown'
-    if not session_id or session_id not in sessions:
-        return jsonify({"error": "session not found"}), 404
-    if attribute is None or answer is None:
-        return jsonify({"error": "attribute and answer required"}), 400
+    answer = data.get("answer")
 
-    session = sessions[session_id]
-    session.update(attribute, answer)
+    if session_id not in sessions:
+        return jsonify({"error": "Sesión no encontrada"}), 404
 
-    # choose next question
-    attrs = engine.get_all_attributes()
-    next_attr = session.choose_best_attribute(attrs)
-    next_q = engine.get_question_info(next_attr) if next_attr else None
+    akin = sessions[session_id]
+    akin.update_with_answer(attribute, answer)
 
-    # build full candidate info
-    top = session.top_candidates(5)
-    candidates = []
-    for pid, prob in top:
-        pest = engine.pests.get(pid, {})
-        candidates.append({
-            "id": pid,
-            "name": pest.get("name"),
-            "probability": round(prob, 3),
-            "image": pest.get("image"),
-            "notes": pest.get("notes", "")
+    # Verificar si ya hay alta probabilidad de identificación
+    top = akin.top_candidates(1)[0]
+    pest_id, prob = top
+
+    if prob > 0.85 or len(akin.asked) >= 12:
+        pest = next(p for p in akin.db["pests"] if p["id"] == pest_id)
+        return jsonify({
+            "finished": True,
+            "pest": {
+                "id": pest["id"],
+                "name": pest["name"],
+                "notes": pest["notes"]
+            }
         })
 
-    return jsonify({"next_question": next_q, "candidates": candidates})
-
-
-@app.route("/api/candidates", methods=["GET"])
-def candidates():
-    session_id = request.args.get("session_id")
-    if not session_id or session_id not in sessions:
-        return jsonify({"error": "session not found"}), 404
-    session = sessions[session_id]
-    top = session.top_candidates(10)
-    candidates = []
-    for pid, prob in top:
-        pest = engine.pests.get(pid, {})
-        candidates.append({
-            "id": pid,
-            "name": pest.get("name"),
-            "probability": round(prob, 3),
-            "image": pest.get("image"),
-            "notes": pest.get("notes", "")
+    # Si no terminó, devolver siguiente pregunta
+    next_q = akin.choose_best_question()
+    if not next_q:
+        candidates = [
+            {"id": pid, "prob": pr}
+            for pid, pr in akin.top_candidates(3)
+        ]
+        return jsonify({
+            "finished": True,
+            "candidates": candidates
         })
-    return jsonify({"candidates": candidates})
+
+    return jsonify({
+        "finished": False,
+        "question": akin.questions[next_q],
+        "attribute": next_q
+    })
 
 
-@app.route("/api/teach", methods=["POST"])
-def teach():
-    # optional security: require header 'X-TEACH-SECRET' if TEACH_SECRET set
-    if TEACH_SECRET:
-        secret = request.headers.get("X-TEACH-SECRET")
-        if secret != TEACH_SECRET:
-            return jsonify({"error": "forbidden"}), 403
-
-    data = request.get_json() or {}
-    # expect full pest dict: id(optional), name, attributes (dict), image(optional), notes(optional), common_names(optional)
-    if "name" not in data or "attributes" not in data:
-        return jsonify({"error": "name and attributes required"}), 400
-    pid = engine.add_new_pest(data)
-    return jsonify({"status": "ok", "id": pid}), 201
-
-
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000)
